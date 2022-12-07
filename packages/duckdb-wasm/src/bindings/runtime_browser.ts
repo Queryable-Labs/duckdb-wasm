@@ -1,5 +1,5 @@
-import { StatusCode } from '../status';
-import { addS3Headers, getHTTPUrl } from '../utils';
+import {StatusCode} from '../status';
+import {addS3Headers, getHTTPUrl} from '../utils';
 
 import {
     callSRet,
@@ -12,7 +12,7 @@ import {
     FileFlags,
     readString,
 } from './runtime';
-import { DuckDBModule } from './duckdb_module';
+import {DuckDBModule} from './duckdb_module';
 import * as udf from './udf_runtime';
 
 export const BROWSER_RUNTIME: DuckDBRuntime & {
@@ -103,6 +103,13 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
             BROWSER_RUNTIME._fileInfoCache.delete(fileId);
             const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
             switch (file?.dataProtocol) {
+                case DuckDBDataProtocol.CUSTOM_HANDLER: {
+                    if (file.openFileHandle) {
+                        return file.openFileHandle(mod, flags);
+                    } else {
+                        throw new Error(`Missing openFileHandle defined for file ${fileId}`);
+                    }
+                }
                 case DuckDBDataProtocol.HTTP:
                 case DuckDBDataProtocol.S3: {
                     if (flags & FileFlags.FILE_FLAGS_READ && flags & FileFlags.FILE_FLAGS_WRITE) {
@@ -290,6 +297,13 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
         BROWSER_RUNTIME._fileInfoCache.delete(fileId);
         switch (file?.dataProtocol) {
+            case DuckDBDataProtocol.CUSTOM_HANDLER: {
+                if (file.closeHandle) {
+                    return file.closeHandle(mod);
+                } else {
+                    throw new Error(`Missing closeHandle defined for file ${fileId}`);
+                }
+            }
             case DuckDBDataProtocol.BUFFER:
             case DuckDBDataProtocol.HTTP:
             case DuckDBDataProtocol.S3:
@@ -310,6 +324,13 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
     truncateFile: (mod: DuckDBModule, fileId: number, newSize: number) => {
         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
         switch (file?.dataProtocol) {
+            case DuckDBDataProtocol.CUSTOM_HANDLER: {
+                if (file.truncateFileHandle) {
+                    return file.truncateFileHandle(mod, newSize);
+                } else {
+                    throw new Error(`Missing truncateFileHandle defined for file ${fileId}`);
+                }
+            }
             case DuckDBDataProtocol.HTTP:
                 failWith(mod, `Cannot truncate a http file`);
                 return;
@@ -337,6 +358,13 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
             switch (file?.dataProtocol) {
                 // File reading from BLOB or HTTP MUST be done with range requests.
                 // We have to check in OPEN if such file supports range requests and upgrade to BUFFER if not.
+                case DuckDBDataProtocol.CUSTOM_HANDLER: {
+                    if (file.readFileHandle) {
+                        return file.readFileHandle(mod, buf, bytes, location);
+                    } else {
+                        throw new Error(`Missing readFileHandle defined for file ${fileId}`);
+                    }
+                }
                 case DuckDBDataProtocol.HTTP:
                 case DuckDBDataProtocol.S3: {
                     if (!file.dataUrl) {
@@ -401,6 +429,13 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
     writeFile: (mod: DuckDBModule, fileId: number, buf: number, bytes: number, location: number) => {
         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
         switch (file?.dataProtocol) {
+            case DuckDBDataProtocol.CUSTOM_HANDLER: {
+                if (file.writeFileHandle) {
+                    return file.writeFileHandle(mod, buf, bytes, location);
+                } else {
+                    throw new Error(`Missing writeFileHandle defined for file ${fileId}`);
+                }
+            }
             case DuckDBDataProtocol.HTTP:
                 failWith(mod, 'Cannot write to HTTP file');
                 return 0;
@@ -437,6 +472,13 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
                 return 0;
             }
 
+            case DuckDBDataProtocol.CUSTOM_HANDLER: {
+                if (file.getLastModificationTimeHandle) {
+                    return file.getLastModificationTimeHandle(mod);
+                } else {
+                    throw new Error(`Missing getLastModificationTimeHandle defined for file ${fileId}`);
+                }
+            }
             case DuckDBDataProtocol.HTTP:
             case DuckDBDataProtocol.S3:
                 return new Date().getTime();
