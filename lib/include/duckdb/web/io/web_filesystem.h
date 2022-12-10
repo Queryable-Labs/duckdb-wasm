@@ -32,7 +32,8 @@ class WebFileSystem : public duckdb::FileSystem {
         BROWSER_FILEREADER = 2,
         BROWSER_FSACCESS = 3,
         HTTP = 4,
-        S3 = 5
+        S3 = 5,
+        CUSTOM_HANDLER = 6
     };
 
     /// A simple buffer.

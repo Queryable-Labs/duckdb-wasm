@@ -179,6 +179,52 @@ export function testFilesystem(
     });
 
     describe('File access', () => {
+        it('Custom Handler Parquet file', async () => {
+            const students: Uint8Array = await resolveData('/uni/studenten.parquet') as Uint8Array;
+
+            expect(students).not.toBeNull();
+
+            await db().registerFileHandle(
+                'studenten-handler.parquet',
+                {
+                    openFileHandle: (mod: duckdb.DuckDBModule, flags: duckdb.FileFlags): number => {
+                        const result = mod._malloc(2 * 8);
+                        mod.HEAPF64[(result >> 3) + 0] = +students.length;
+                        mod.HEAPF64[(result >> 3) + 1] = 0;
+                        return result;
+                    },
+                    readFileHandle: (mod: duckdb.DuckDBModule, buf: number, bytes: number, location: number): number => {
+                        const src = students.slice(location, location + bytes);
+                        mod.HEAPU8.set(src, buf);
+                        return src.byteLength;
+                    },
+                    writeFileHandle: (mod: duckdb.DuckDBModule, buf: number, bytes: number, location: number): number => {
+                        throw new Error("Not supported");
+                    },
+                    truncateFileHandle: (mod: duckdb.DuckDBModule, newSize: number): number => {
+                        throw new Error("Not supported");
+                    },
+                    getLastModificationTimeHandle: (mod: duckdb.DuckDBModule): number => {
+                        return new Date().getTime();
+                    },
+                    closeHandle: (mod: duckdb.DuckDBModule): void => {
+                        // nothing to do
+                    }
+                },
+                duckdb.DuckDBDataProtocol.CUSTOM_HANDLER,
+                false,
+            );
+            const result = await conn.send(`SELECT matrnr FROM parquet_scan('studenten-handler.parquet');`);
+            const batches = [];
+            for await (const batch of result) {
+                batches.push(batch);
+            }
+            const table = await new arrow.Table<{ matrnr: arrow.Int }>(batches);
+            expect(table.getChildAt(0)?.toArray()).toEqual(
+                new Int32Array([24002, 25403, 26120, 26830, 27550, 28106, 29120, 29555]),
+            );
+        });
+
         it('Small Parquet file', async () => {
             await db().registerFileURL('studenten.parquet', `${baseDir}/uni/studenten.parquet`, baseDirProto, true);
             const result = await conn.send(`SELECT matrnr FROM parquet_scan('studenten.parquet');`);

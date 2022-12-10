@@ -86,6 +86,7 @@ static duckdb::FileHandle &GetOrOpen(size_t file_id) {
         case WebFileSystem::DataProtocol::BUFFER:
         case WebFileSystem::DataProtocol::HTTP:
         case WebFileSystem::DataProtocol::S3:
+        case WebFileSystem::DataProtocol::CUSTOM_HANDLER:
             throw std::logic_error("data protocol not supported by fake webfs runtime");
     }
     throw std::logic_error("unknown data protocol");
@@ -415,6 +416,7 @@ arrow::Result<std::unique_ptr<WebFileSystem::WebFileHandle>> WebFileSystem::Regi
             // Overwrite with buffer
             case DataProtocol::HTTP:
             case DataProtocol::S3:
+            case DataProtocol::CUSTOM_HANDLER:
             case DataProtocol::BUFFER:
                 file->data_protocol_ = DataProtocol::BUFFER;
                 file->file_size_ = file_buffer.Size();
@@ -631,6 +633,7 @@ std::unique_ptr<duckdb::FileHandle> WebFileSystem::OpenFile(const string &url, u
         case DataProtocol::BROWSER_FSACCESS:
         case DataProtocol::HTTP:
         case DataProtocol::S3:
+        case DataProtocol::CUSTOM_HANDLER:
             try {
                 // Open the file
                 auto *opened = duckdb_web_fs_file_open(file->file_id_, flags);
@@ -749,7 +752,8 @@ int64_t WebFileSystem::Read(duckdb::FileHandle &handle, void *buffer, int64_t nr
 
         // Try to read read with readahead
         case DataProtocol::HTTP:
-        case DataProtocol::S3: {
+        case DataProtocol::S3:
+        case DataProtocol::CUSTOM_HANDLER: {
             if (auto ra = file_hdl.ResolveReadAheadBuffer(file_guard)) {
                 auto reader = [&](auto *out, size_t n, duckdb::idx_t ofs) {
                     return duckdb_web_fs_file_read(file.file_id_, out, n, ofs);
@@ -867,6 +871,8 @@ int64_t WebFileSystem::Write(duckdb::FileHandle &handle, void *buffer, int64_t n
             throw std::runtime_error("HTTP files do not support writing");
         case DataProtocol::S3:
             throw std::runtime_error("S3 files do not support writing");
+        case DataProtocol::CUSTOM_HANDLER:
+            throw std::runtime_error("Custom Handler files do not support writing yet");
     }
     // Invalidate all readahead buffers
     InvalidateReadAheads(file.file_id_, file_guard);
@@ -895,7 +901,8 @@ time_t WebFileSystem::GetLastModifiedTime(duckdb::FileHandle &handle) {
         case DataProtocol::BROWSER_FSACCESS:
         case DataProtocol::NODE_FS:
         case DataProtocol::HTTP:
-        case DataProtocol::S3: {
+        case DataProtocol::S3:
+        case DataProtocol::CUSTOM_HANDLER: {
             return duckdb_web_fs_file_get_last_modified_time(file.file_id_);
         }
     }
@@ -920,7 +927,8 @@ void WebFileSystem::Truncate(duckdb::FileHandle &handle, int64_t new_size) {
         case DataProtocol::BROWSER_FSACCESS:
         case DataProtocol::NODE_FS:
         case DataProtocol::HTTP:
-        case DataProtocol::S3: {
+        case DataProtocol::S3:
+        case DataProtocol::CUSTOM_HANDLER: {
             duckdb_web_fs_file_truncate(file.file_id_, new_size);
             break;
         }
