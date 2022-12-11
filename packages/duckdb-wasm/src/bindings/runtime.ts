@@ -42,7 +42,7 @@ export enum DuckDBDataProtocol {
     BROWSER_FSACCESS = 3,
     HTTP = 4,
     S3 = 5,
-    CUSTOM_HANDLER = 6,
+    IPFS = 6,
 }
 
 /** File flags for opening files*/
@@ -79,12 +79,6 @@ export interface DuckDBFileInfo {
     dataUrl: string | null;
     allowFullHttpReads?: boolean;
     s3Config?: S3Config;
-    openFileHandle?: (mod: DuckDBModule, flags: FileFlags) => number,
-    readFileHandle?: (mod: DuckDBModule, buf: number, bytes: number, location: number) => number,
-    writeFileHandle?: (mod: DuckDBModule, buf: number, bytes: number, location: number) => number,
-    truncateFileHandle?: (mod: DuckDBModule, newSize: number) => number,
-    getLastModificationTimeHandle?: (mod: DuckDBModule) => number,
-    closeHandle?: (mod: DuckDBModule) => void;
 }
 
 /** Global info for all files registered with DuckDB */

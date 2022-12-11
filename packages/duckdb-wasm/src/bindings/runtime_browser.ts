@@ -14,6 +14,7 @@ import {
 } from './runtime';
 import {DuckDBModule} from './duckdb_module';
 import * as udf from './udf_runtime';
+import {getIPFSFileSize, getIPFSLastModificationTime, getIPFSUrl} from "../utils/ipfs_helper";
 
 export const BROWSER_RUNTIME: DuckDBRuntime & {
     _fileInfoCache: Map<number, DuckDBFileInfo>;
@@ -103,15 +104,9 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
             BROWSER_RUNTIME._fileInfoCache.delete(fileId);
             const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
             switch (file?.dataProtocol) {
-                case DuckDBDataProtocol.CUSTOM_HANDLER: {
-                    if (file.openFileHandle) {
-                        return file.openFileHandle(mod, flags);
-                    } else {
-                        throw new Error(`Missing openFileHandle defined for file ${fileId}`);
-                    }
-                }
                 case DuckDBDataProtocol.HTTP:
-                case DuckDBDataProtocol.S3: {
+                case DuckDBDataProtocol.S3:
+                case DuckDBDataProtocol.IPFS: {
                     if (flags & FileFlags.FILE_FLAGS_READ && flags & FileFlags.FILE_FLAGS_WRITE) {
                         throw new Error(
                             `Opening file ${file.fileName} failed: cannot open file with both read and write flags set`,
@@ -121,6 +116,12 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
                             `Opening file ${file.fileName} failed: appending to HTTP/S3 files is not supported`,
                         );
                     } else if (flags & FileFlags.FILE_FLAGS_WRITE) {
+                        if (file.dataProtocol == DuckDBDataProtocol.IPFS) {
+                            throw new Error(
+                                `Opening file ${file.fileName} failed: No support to write files opened using IPFS protocol`,
+                            )
+                        }
+
                         // We send a HEAD request to try to determine if we can write to data_url
                         const xhr = new XMLHttpRequest();
                         if (file.dataProtocol == DuckDBDataProtocol.S3) {
@@ -164,6 +165,11 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
                         if (file.dataProtocol == DuckDBDataProtocol.S3) {
                             xhr.open('HEAD', getHTTPUrl(file.s3Config, file.dataUrl!), false);
                             addS3Headers(xhr, file.s3Config, file.dataUrl!, 'HEAD');
+                        } else if (file.dataProtocol == DuckDBDataProtocol.IPFS) {
+                            const result = mod._malloc(2 * 8);
+                            mod.HEAPF64[(result >> 3) + 0] = +getIPFSFileSize(file.dataUrl!);
+                            mod.HEAPF64[(result >> 3) + 1] = 0;
+                            return result;
                         } else {
                             xhr.open('HEAD', file.dataUrl!, false);
                         }
@@ -297,16 +303,10 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
         BROWSER_RUNTIME._fileInfoCache.delete(fileId);
         switch (file?.dataProtocol) {
-            case DuckDBDataProtocol.CUSTOM_HANDLER: {
-                if (file.closeHandle) {
-                    return file.closeHandle(mod);
-                } else {
-                    throw new Error(`Missing closeHandle defined for file ${fileId}`);
-                }
-            }
             case DuckDBDataProtocol.BUFFER:
             case DuckDBDataProtocol.HTTP:
             case DuckDBDataProtocol.S3:
+            case DuckDBDataProtocol.IPFS:
                 break;
             case DuckDBDataProtocol.NODE_FS:
             case DuckDBDataProtocol.BROWSER_FILEREADER:
@@ -324,13 +324,9 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
     truncateFile: (mod: DuckDBModule, fileId: number, newSize: number) => {
         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
         switch (file?.dataProtocol) {
-            case DuckDBDataProtocol.CUSTOM_HANDLER: {
-                if (file.truncateFileHandle) {
-                    return file.truncateFileHandle(mod, newSize);
-                } else {
-                    throw new Error(`Missing truncateFileHandle defined for file ${fileId}`);
-                }
-            }
+            case DuckDBDataProtocol.IPFS:
+                failWith(mod, `Cannot truncate a IPFS file`);
+                return;
             case DuckDBDataProtocol.HTTP:
                 failWith(mod, `Cannot truncate a http file`);
                 return;
@@ -358,15 +354,9 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
             switch (file?.dataProtocol) {
                 // File reading from BLOB or HTTP MUST be done with range requests.
                 // We have to check in OPEN if such file supports range requests and upgrade to BUFFER if not.
-                case DuckDBDataProtocol.CUSTOM_HANDLER: {
-                    if (file.readFileHandle) {
-                        return file.readFileHandle(mod, buf, bytes, location);
-                    } else {
-                        throw new Error(`Missing readFileHandle defined for file ${fileId}`);
-                    }
-                }
                 case DuckDBDataProtocol.HTTP:
-                case DuckDBDataProtocol.S3: {
+                case DuckDBDataProtocol.S3:
+                case DuckDBDataProtocol.IPFS: {
                     if (!file.dataUrl) {
                         throw new Error(`Missing data URL for file ${fileId}`);
                     }
@@ -375,6 +365,8 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
                         if (file.dataProtocol == DuckDBDataProtocol.S3) {
                             xhr.open('GET', getHTTPUrl(file?.s3Config, file.dataUrl!), false);
                             addS3Headers(xhr, file?.s3Config, file.dataUrl!, 'GET');
+                        } else if (file.dataProtocol == DuckDBDataProtocol.IPFS) {
+                            xhr.open('POST', getIPFSUrl(file.dataUrl!, location, bytes), false);
                         } else {
                             xhr.open('GET', file.dataUrl!, false);
                         }
@@ -429,13 +421,9 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
     writeFile: (mod: DuckDBModule, fileId: number, buf: number, bytes: number, location: number) => {
         const file = BROWSER_RUNTIME.getFileInfo(mod, fileId);
         switch (file?.dataProtocol) {
-            case DuckDBDataProtocol.CUSTOM_HANDLER: {
-                if (file.writeFileHandle) {
-                    return file.writeFileHandle(mod, buf, bytes, location);
-                } else {
-                    throw new Error(`Missing writeFileHandle defined for file ${fileId}`);
-                }
-            }
+            case DuckDBDataProtocol.IPFS:
+                failWith(mod, 'Cannot write to IPFS file');
+                return 0;
             case DuckDBDataProtocol.HTTP:
                 failWith(mod, 'Cannot write to HTTP file');
                 return 0;
@@ -472,13 +460,8 @@ export const BROWSER_RUNTIME: DuckDBRuntime & {
                 return 0;
             }
 
-            case DuckDBDataProtocol.CUSTOM_HANDLER: {
-                if (file.getLastModificationTimeHandle) {
-                    return file.getLastModificationTimeHandle(mod);
-                } else {
-                    throw new Error(`Missing getLastModificationTimeHandle defined for file ${fileId}`);
-                }
-            }
+            case DuckDBDataProtocol.IPFS:
+                return getIPFSLastModificationTime(file.dataUrl!);
             case DuckDBDataProtocol.HTTP:
             case DuckDBDataProtocol.S3:
                 return new Date().getTime();

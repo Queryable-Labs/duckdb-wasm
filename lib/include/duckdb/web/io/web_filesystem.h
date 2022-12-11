@@ -33,7 +33,7 @@ class WebFileSystem : public duckdb::FileSystem {
         BROWSER_FSACCESS = 3,
         HTTP = 4,
         S3 = 5,
-        CUSTOM_HANDLER = 6
+        IPFS = 6
     };
 
     /// A simple buffer.

@@ -1,6 +1,6 @@
 {
     "name": "@duckdb/duckdb-wasm-shell",
-    "version": "1.11.0",
+    "version": "1.20.2-dev1.0",
     "description": "",
     "author": "Andre Kohn <kohn.a@outlook.com>",
     "license": "MIT",
